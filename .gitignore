@@ -1,0 +1,26 @@
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+# TypeScript build output
+dist
+lib
+build
+out
+coverage
+
+# Local env files
+.env
+.env.*
+
+# IDE files
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db
