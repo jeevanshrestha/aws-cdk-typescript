@@ -2,11 +2,15 @@
 import * as cdk from 'aws-cdk-lib';
 //import { AwsCdkStack } from '../lib/aws-cdk-stack';
 import { AwsS3Stack  } from '../lib/aws-s3-stack';
-
+import {AwsLambdaFunctionStack} from '../lib/aws-lambdafunction-stack'
 const app = new cdk.App();
 const is_prod = false;
 
-new AwsS3Stack(app, 'AwsS3Stack', { }, is_prod );
+const s3Stack = new AwsS3Stack(app, 'AwsS3Stack', {}, is_prod);
+const lambdaStack = new AwsLambdaFunctionStack(app, 'AwsLambdaFunctionStack',{targetBucketArn: s3Stack.BucketArn} );
+
+// Make Lambda stack depend on S3 stack
+lambdaStack.addDependency(s3Stack);
 
 // new AwsCdkStack(app, 'AwsCdkStack', {
 //   /* If you don't specify 'env', this stack will be environment-agnostic.
