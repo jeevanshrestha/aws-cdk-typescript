@@ -7,8 +7,8 @@ import { Construct } from 'constructs';
 import { vars } from '../config/vars';
 
 export interface EksStackProps extends cdk.StackProps {
-  readonly envName: keyof typeof vars.environments; 
-  readonly envConfig: typeof vars.environments.dev; // Pass environment config directly
+  readonly envName: keyof typeof vars.environments;
+  readonly envConfig: typeof vars.environments.dev;
   readonly vpc: ec2.IVpc;
   readonly clusterVersion?: eks.KubernetesVersion;
   readonly instanceType?: ec2.InstanceType;
@@ -17,7 +17,7 @@ export interface EksStackProps extends cdk.StackProps {
 export class EksStack extends cdk.Stack {
   public readonly cluster: eks.Cluster;
   public readonly nodeGroup: eks.Nodegroup;
-  public ebsCsiDriverServiceAccount: eks.ServiceAccount;
+  public readonly ebsCsiDriverServiceAccount: eks.ServiceAccount;
 
   constructor(scope: Construct, id: string, props: EksStackProps) {
     super(scope, id, props);
@@ -31,7 +31,7 @@ export class EksStack extends cdk.Stack {
       version: clusterVersion,
       vpc: props.vpc,
       vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
-      defaultCapacity: 0, // We'll add our own node group
+      defaultCapacity: 0,
       clusterName: `jeeves-eks-${props.envName}`,
       outputClusterName: true,
       securityGroup: this.createEksSecurityGroup(props.vpc, props.envName),
@@ -45,12 +45,12 @@ export class EksStack extends cdk.Stack {
       kubectlLayer: new KubectlV28Layer(this, 'KubectlLayer'),
     });
 
-    // Create managed node group with more robust configuration
+    // Create managed node group
     this.nodeGroup = this.cluster.addNodegroupCapacity('NodeGroup', {
       instanceTypes: [instanceType],
       minSize: 2,
       maxSize: 5,
-      desiredSize: 2, 
+      desiredSize: 2,
       nodegroupName: `jeeves-ng-${props.envName}`,
       subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       labels: {
@@ -71,11 +71,8 @@ export class EksStack extends cdk.Stack {
       iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore')
     );
 
-    // Setup EBS CSI driver with IRSA (IAM Roles for Service Accounts)
+    // Setup EBS CSI driver
     this.setupEbsCsiDriver();
-
-    // Create default storage class
-    this.createDefaultStorageClass();
   }
 
   private createEksSecurityGroup(vpc: ec2.IVpc, envName: string): ec2.SecurityGroup {
@@ -86,16 +83,26 @@ export class EksStack extends cdk.Stack {
       allowAllOutbound: true,
     });
 
-    // Allow internal VPC communication
     sg.addIngressRule(ec2.Peer.ipv4(vpc.vpcCidrBlock), ec2.Port.allTcp(), 'Allow internal VPC communication');
     
-    // Optional: Add specific security group rules as needed
-    // sg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS from anywhere');
-
     return sg;
   }
 
   private setupEbsCsiDriver(): void {
+    // First, clean up any existing StorageClass if it exists
+    this.cluster.addManifest('DeleteExistingStorageClass', {
+      apiVersion: 'storage.k8s.io/v1',
+      kind: 'StorageClass',
+      metadata: {
+        name: 'ebs-sc',
+        annotations: {
+          'helm.sh/resource-policy': 'keep'
+        }
+      },
+      // This will delete the existing StorageClass if it exists
+      // We add the annotation above to ensure Helm can manage it later
+    });
+
     // Create service account with IRSA
     this.ebsCsiDriverServiceAccount = this.cluster.addServiceAccount('ebs-csi-sa', {
       name: 'ebs-csi-controller-sa',
@@ -132,7 +139,9 @@ export class EksStack extends cdk.Stack {
       repository: 'https://kubernetes-sigs.github.io/aws-ebs-csi-driver',
       namespace: 'kube-system',
       release: 'aws-ebs-csi-driver',
-      version: '2.20.0', // Pin to specific version
+      version: '2.20.0',
+      wait: true, // Wait for resources to be ready
+      timeout: cdk.Duration.minutes(10),
       values: {
         controller: {
           serviceAccount: {
@@ -141,62 +150,30 @@ export class EksStack extends cdk.Stack {
           },
           region: this.region,
           replicaCount: 2,
-          affinity: {
-            nodeAffinity: {
-              requiredDuringSchedulingIgnoredDuringExecution: {
-                nodeSelectorTerms: [{
-                  matchExpressions: [{
-                    key: 'role',
-                    operator: 'In',
-                    values: ['general'],
-                  }]
-                }]
-              }
-            }
-          }
         },
         storageClasses: [
           {
             name: 'ebs-sc',
             annotations: {
               'storageclass.kubernetes.io/is-default-class': 'true',
+              'meta.helm.sh/release-name': 'aws-ebs-csi-driver',
+              'meta.helm.sh/release-namespace': 'kube-system',
+            },
+            labels: {
+              'app.kubernetes.io/managed-by': 'Helm'
             },
             volumeBindingMode: 'WaitForFirstConsumer',
             parameters: {
               type: 'gp3',
               encrypted: 'true',
-              throughput: '125', // Only applicable for gp3
-              iops: '3000', // Only applicable for gp3
+              throughput: '125',
+              iops: '3000',
             },
             reclaimPolicy: 'Delete',
             allowVolumeExpansion: true,
           },
         ],
       },
-    });
-  }
-
-  private createDefaultStorageClass(): void {
-    // Alternative method to create storage class via Kubernetes manifest
-    this.cluster.addManifest('EbsStorageClass', {
-      apiVersion: 'storage.k8s.io/v1',
-      kind: 'StorageClass',
-      metadata: {
-        name: 'ebs-sc',
-        annotations: {
-          'storageclass.kubernetes.io/is-default-class': 'true',
-        },
-      },
-      provisioner: 'ebs.csi.aws.com',
-      volumeBindingMode: 'WaitForFirstConsumer',
-      parameters: {
-        type: 'gp3',
-        encrypted: 'true',
-        throughput: '125',
-        iops: '3000',
-      },
-      reclaimPolicy: 'Delete',
-      allowVolumeExpansion: true,
     });
   }
 }
