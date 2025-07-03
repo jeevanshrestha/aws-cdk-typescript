@@ -47,7 +47,7 @@ export class RdsDynamoDbStack extends cdk.Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [props.dbSecurityGroup],
       databaseName: databaseName,
-      credentials: rds.Credentials.fromGeneratedSecret('admin'), // Auto-generated secure credentials
+  
       backupRetention: props.envName === 'prod' ? cdk.Duration.days(7) : cdk.Duration.days(1),
       deletionProtection: props.envName === 'prod',
       removalPolicy: props.envName === 'prod' 

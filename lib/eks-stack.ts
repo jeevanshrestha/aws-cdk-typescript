@@ -1,8 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as eks from 'aws-cdk-lib/aws-eks';
-import { KubectlV28Layer } from '@aws-cdk/lambda-layer-kubectl-v28';
+import { KubectlV32Layer } from '@aws-cdk/lambda-layer-kubectl-v32';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import { Size } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { vars } from '../config/vars';
 
@@ -12,12 +13,13 @@ export interface EksStackProps extends cdk.StackProps {
   readonly vpc: ec2.IVpc;
   readonly clusterVersion?: eks.KubernetesVersion;
   readonly instanceType?: ec2.InstanceType;
+  readonly kubeUserArn?: string; // Specific property for direct user mapping
 }
 
 export class EksStack extends cdk.Stack {
   public readonly cluster: eks.Cluster;
   public readonly nodeGroup: eks.Nodegroup;
-  public readonly ebsCsiDriverServiceAccount: eks.ServiceAccount;
+  public ebsCsiDriverServiceAccount: eks.ServiceAccount;
 
   constructor(scope: Construct, id: string, props: EksStackProps) {
     super(scope, id, props);
@@ -25,6 +27,7 @@ export class EksStack extends cdk.Stack {
     // Default values
     const clusterVersion = props.clusterVersion ?? eks.KubernetesVersion.V1_28;
     const instanceType = props.instanceType ?? new ec2.InstanceType('t3.medium');
+    const kubeUserArn = props.kubeUserArn ?? `arn:aws:iam::${this.account}:root`;
 
     // Create the EKS cluster
     this.cluster = new eks.Cluster(this, 'JeevesEksCluster', {
@@ -35,15 +38,23 @@ export class EksStack extends cdk.Stack {
       clusterName: `jeeves-eks-${props.envName}`,
       outputClusterName: true,
       securityGroup: this.createEksSecurityGroup(props.vpc, props.envName),
+      kubectlLayer: new KubectlV32Layer(this, 'KubectlLayer'),
       clusterLogging: [
         eks.ClusterLoggingTypes.API,
         eks.ClusterLoggingTypes.AUDIT,
         eks.ClusterLoggingTypes.AUTHENTICATOR,
         eks.ClusterLoggingTypes.CONTROLLER_MANAGER,
         eks.ClusterLoggingTypes.SCHEDULER,
-      ],
-      kubectlLayer: new KubectlV28Layer(this, 'KubectlLayer'),
+      ] as eks.ClusterLoggingTypes[],
+      endpointAccess: eks.EndpointAccess.PUBLIC,
     });
+
+    // Directly map the IAM user to system:masters group
+    this.cluster.awsAuth.addUserMapping(
+      iam.User.fromUserArn(this, 'KubeUser', kubeUserArn), {
+        groups: ['system:masters']
+      }
+    );
 
     // Create managed node group
     this.nodeGroup = this.cluster.addNodegroupCapacity('NodeGroup', {
@@ -73,6 +84,12 @@ export class EksStack extends cdk.Stack {
 
     // Setup EBS CSI driver
     this.setupEbsCsiDriver();
+
+    // Output the user mapping information
+    new cdk.CfnOutput(this, 'KubeUserMapping', {
+      value: `User ${kubeUserArn} granted system:masters access`,
+      description: 'Direct IAM user access configuration',
+    });
   }
 
   private createEksSecurityGroup(vpc: ec2.IVpc, envName: string): ec2.SecurityGroup {
@@ -89,20 +106,6 @@ export class EksStack extends cdk.Stack {
   }
 
   private setupEbsCsiDriver(): void {
-    // First, clean up any existing StorageClass if it exists
-    this.cluster.addManifest('DeleteExistingStorageClass', {
-      apiVersion: 'storage.k8s.io/v1',
-      kind: 'StorageClass',
-      metadata: {
-        name: 'ebs-sc',
-        annotations: {
-          'helm.sh/resource-policy': 'keep'
-        }
-      },
-      // This will delete the existing StorageClass if it exists
-      // We add the annotation above to ensure Helm can manage it later
-    });
-
     // Create service account with IRSA
     this.ebsCsiDriverServiceAccount = this.cluster.addServiceAccount('ebs-csi-sa', {
       name: 'ebs-csi-controller-sa',
@@ -140,13 +143,13 @@ export class EksStack extends cdk.Stack {
       namespace: 'kube-system',
       release: 'aws-ebs-csi-driver',
       version: '2.20.0',
-      wait: true, // Wait for resources to be ready
+      wait: true,
       timeout: cdk.Duration.minutes(10),
       values: {
         controller: {
           serviceAccount: {
             create: false,
-            name: 'ebs-csi-controller-sa',
+            name: this.ebsCsiDriverServiceAccount.serviceAccountName,
           },
           region: this.region,
           replicaCount: 2,
@@ -156,11 +159,6 @@ export class EksStack extends cdk.Stack {
             name: 'ebs-sc',
             annotations: {
               'storageclass.kubernetes.io/is-default-class': 'true',
-              'meta.helm.sh/release-name': 'aws-ebs-csi-driver',
-              'meta.helm.sh/release-namespace': 'kube-system',
-            },
-            labels: {
-              'app.kubernetes.io/managed-by': 'Helm'
             },
             volumeBindingMode: 'WaitForFirstConsumer',
             parameters: {

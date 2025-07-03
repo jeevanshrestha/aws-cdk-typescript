@@ -104,12 +104,12 @@ new cdk.CfnOutput(ec2Stack, 'WebInstanceIds', {
 });
  
 // Create S3 stack 
-const s3Stack = new AwsS3Stack(app, 'S3Stack', {
+const s3Stack = new AwsS3Stack(app, 'Jeeves-S3Stack', {
     env: stackEnv
 });
 
 // Create Lambda stack that depends on the S3 bucket
-const lambdaStack = new AwsLambdaFunctionStack(app, 'LambdaStack', {
+const lambdaStack = new AwsLambdaFunctionStack(app, 'Jeeves-LambdaStack', {
     env: stackEnv,
     targetBucket: s3Stack.targetBucket
 });
@@ -132,7 +132,7 @@ new cdk.CfnOutput(lambdaStack, 'LambdaArnExport', {
 });
 
 // Create the RDS and DynamoDB stack with explicit dependencies
-const rdsDynamoDbStack = new RdsDynamoDbStack(app, 'RdsDynamoDbStack', {
+const rdsDynamoDbStack = new RdsDynamoDbStack(app, 'Jeeves-RdsDynamoDbStack', {
   envName,
   envConfig,
   env: stackEnv,
@@ -162,11 +162,12 @@ new cdk.CfnOutput(rdsDynamoDbStack, 'DynamoTableArnOutput', {
 
 
 // Create EKS Stack that depends on VPC
-const eksStack = new EksStack(app, 'EksStack', {
+const eksStack = new EksStack(app, 'Jeeves-EksStack', {
   envName,
   envConfig,
   env: stackEnv,
   vpc: vpcStack.vpc, 
+  kubeUserArn: 'arn:aws:iam::480926032159:user/kubeuser',
   instanceType: new ec2.InstanceType('t3.medium'), // Optional override
 });
 
