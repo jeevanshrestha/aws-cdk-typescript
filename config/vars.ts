@@ -1,9 +1,16 @@
 export const vars = {
+  "projectName": "AWS Full Stack Project",
+  "projectDescription": "A full stack application deployed on AWS using CDK, including VPC, EC2, S3, and Lambda.",
+  "projectVersion": "1.0.0",  
+  "keyPairName": "Terraform-Key", // Key pair name for EC2 instances
+  "defaultInstanceType": "t3.micro", // Default instance type for EC2
+  "defaultWebInstanceCount": 2, // Default number of web instances
     "environments": {
-      "dev": {
-        "environmentName": "Development",
+      "dev": {     
+        "account": "480926032159",
+        "region": "ap-southeast-2", 
         "tags": {
-          "Project": "MyProject",
+          "Project": "AWS Full Stack Project",
           "Environment": "Development",
           "Owner": "Jeevan Shrestha",
           "SupportEmail": "jeevan.shrestha@example.com",
@@ -24,14 +31,20 @@ export const vars = {
               "name": "private",
               "subnetType": "PRIVATE_WITH_EGRESS",
               "cidrMask": 24
+            },
+            {
+              "name": "isolated",
+              "subnetType": "PRIVATE_ISOLATED",
+              "cidrMask": 24
             }
           ]
         }
       },
       "prod": {
-        "environmentName": "Production",
+        "account": "480926032159",
+        "region": "ap-southeast-2", 
         "tags": {
-          "Project": "MyProject",
+          "Project": "AWS Full Stack Project - Production",
           "Environment": "Production",
           "Owner": "Jeevan Shrestha",
           "SupportEmail": "jeevan.shrestha@example.com",
@@ -61,14 +74,6 @@ export const vars = {
           ]
         }
       }
-    },
-    "dev":{
-      "account": "480926032159",
-      "region": "us-east-1"
-    },
-    "prod":{
-      "account": "480926032159",
-      "region": "ap-southeast-2"
     }
 }
     
